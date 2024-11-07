@@ -1,13 +1,34 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
+<head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  </head>
-  <body>
-    <div id="app">
-      <!-- todo -->
+    <title>Cache Collection Game</title>
+    <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+    <div id="gameContainer">
+        <!-- Control Panel for Game Actions -->
+        <div id="controlPanel">
+            <button id="sensor" title="Activate Sensor">🔍</button>
+            <button id="north" title="Move North">⬆️</button>
+            <button id="south" title="Move South">⬇️</button>
+            <button id="west" title="Move West">⬅️</button>
+            <button id="east" title="Move East">➡️</button>
+            <button id="reset" title="Reset Game">♻️</button>
+        </div>
+
+        <!-- Status Panel displaying the player's current coins -->
+        <div id="statusPanel">
+            <p>Coins: <span id="coinCount">0</span></p>
+        </div>
+
+        <!-- The map where game interaction happens -->
+        <div id="map" style="height: 80vh; width: 100%;"></div>
+
+        
     </div>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
 </html>
