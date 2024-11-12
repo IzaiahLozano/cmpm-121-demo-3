@@ -1,5 +1,5 @@
 //Imports
-import leaflet from "leaflet";
+import * as leaflet from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "./style.css";
 import "./leafletWorkaround.ts";
@@ -11,9 +11,14 @@ const zoom = 19;
 const TileDegree = 1e-4;
 const SpawnRadius = 8;
 const CacheRate = 0.1;
+let geoWatchId: number | null = null;
+let autoUpdateEnabled = false;
 
 //Cache store to keep track of generated cache rectangles
 let CacheStorage: leaflet.Rectangle[] = [];
+
+// Store for individual movement polylines
+let movementPolylines: leaflet.Polyline[] = [];
 
 //Map Setup
 const map = leaflet.map(document.getElementById("map")!, {
@@ -38,6 +43,7 @@ playerMarker.addTo(map);
 let playerCoins: Coin[] = []; //Store player coins as objects
 const statusPanel = document.querySelector<HTMLDivElement>("#statusPanel")!;
 statusPanel.innerHTML = "0 Coins in Inventory";
+document.getElementById("geoToggle")!.addEventListener("click", togglelocation);
 
 //Initialize caches
 function initializeCaches() {
@@ -170,6 +176,18 @@ function updatePopupValue(popupDiv: HTMLDivElement) {
   });
 }
 
+function updatePlayerPosition(position: GeolocationPosition) {
+  const { latitude, longitude } = position.coords;
+
+  // Update player position and marker on the map
+  playerPosition = leaflet.latLng(latitude, longitude);
+  playerMarker.setLatLng(playerPosition);
+  map.panTo(playerPosition);
+
+  // Regenerate caches around the new position
+  GenerateNearbyCaches();
+}
+
 //Generate caches nearby
 function GenerateNearbyCaches() {
   const { i: playerI, j: playerJ } = getCellCoordinates(
@@ -222,7 +240,30 @@ class CacheCaretaker {
 const cacheCaretaker = new CacheCaretaker();
 cacheCaretaker.save(new Map());
 
-//Player Movement Settings Beyond this point -----------------
+//GEO-LOCATION SETTINGS BELOW------------------
+
+function togglelocation() {
+  if (autoUpdateEnabled) {
+    // Stop the geolocation watch if it's active
+    if (geoWatchId !== null) {
+      navigator.geolocation.clearWatch(geoWatchId);
+      geoWatchId = null;
+    }
+    autoUpdateEnabled = false;
+    (moveButtons.reset as HTMLButtonElement).disabled = false; // Re-enable the reset button
+  } else {
+    // Start the geolocation watch
+    geoWatchId = navigator.geolocation.watchPosition(
+      updatePlayerPosition, // Function to update player position
+    );
+    autoUpdateEnabled = true;
+  }
+}
+
+//Player Movement Settings Below -----------------
+
+let movementHistory: leaflet.LatLng[] = []; // Store the player's path
+
 const moveButtons = {
   north: document.getElementById("north"),
   south: document.getElementById("south"),
@@ -239,36 +280,140 @@ if (
   moveButtons.south.addEventListener("click", () => PlayerMoves(-1, 0));
   moveButtons.west.addEventListener("click", () => PlayerMoves(0, -1));
   moveButtons.east.addEventListener("click", () => PlayerMoves(0, 1));
-  moveButtons.reset.addEventListener("click", resetPlayer); //Reset to the starting point
+  moveButtons.reset.addEventListener("click", resetGame); //Reset to the starting point
 }
 
 //Movement Behavior
 function PlayerMoves(deltaI: number, deltaJ: number) {
   const movementDistance = TileDegree;
-  playerPosition = leaflet.latLng(
+  const newPlayerPosition = leaflet.latLng(
     playerPosition.lat + deltaI * movementDistance,
     playerPosition.lng + deltaJ * movementDistance,
   );
+
+  // Create a polyline segment for the new movement
+  const movementSegment = leaflet.polyline(
+    [playerPosition, newPlayerPosition],
+    {
+      color: "blue",
+      weight: 2,
+      opacity: 0.7,
+    },
+  ).addTo(map);
+
+  // Store this polyline for potential removal later (if needed)
+  movementPolylines.push(movementSegment);
+
+  // Update player position and map view
+  playerPosition = newPlayerPosition;
   playerMarker.setLatLng(playerPosition);
   map.panTo(playerPosition);
 
-  //Generate caches around player's new position
+  // Regenerate caches and update movement history (if needed)
   GenerateNearbyCaches();
 }
 
-//Reset player position at start
-function resetPlayer() {
-  //Reset player position
-  playerPosition = Kingsburg_StartPoint;
-  playerMarker.setLatLng(Kingsburg_StartPoint);
-  map.panTo(Kingsburg_StartPoint);
+//Reset player position at start + reset game state
+function resetGame() {
+  const userConfirmation = prompt(
+    "Are you sure you want to reset the game? This will erase your progress. Type 'YES' to confirm.",
+  );
 
-  //Remove existing cache rectangles from the map and clear CacheStorage
-  CacheStorage.forEach((rect) => map.removeLayer(rect));
-  CacheStorage = []; //Clear the array
+  if (userConfirmation === "YES") {
+    // Reset player position
+    playerPosition = Kingsburg_StartPoint;
+    playerMarker.setLatLng(Kingsburg_StartPoint);
+    map.panTo(Kingsburg_StartPoint);
 
-  //Reinitialize caches after clearing
-  initializeCaches();
+    // Remove collected coins (if any)
+    playerCoins = [];
+
+    // Clear movement history and remove polylines
+    movementHistory = [];
+    movementPolylines.forEach((polyline) => map.removeLayer(polyline));
+    movementPolylines = [];
+
+    // Return coins to caches (clear all cache storage and reset them)
+    CacheStorage.forEach((rect) => {
+      const cacheKey = rect.getBounds().toBBoxString();
+      coinCounters.set(cacheKey, 0); //Reset coin counters
+    });
+
+    // Clear the map of caches and reset them
+    CacheStorage.forEach((rect) => map.removeLayer(rect));
+    CacheStorage = [];
+    initializeCaches(); //Reinitialize caches
+    updateStatus();
+
+    console.log("Game reset complete.");
+  } else {
+    //Canceled reset
+    console.log("Game reset canceled.");
+  }
 }
+//Save and load player state settings Below------------------------------
+
+// Save player state to localStorage
+function saveState() {
+  const state = {
+    position: playerPosition,
+    coins: playerCoins.map((coin) => coin.id), // Save the coin IDs the player has
+    movementHistory: movementHistory.map((latLng) => ({
+      lat: latLng.lat,
+      lng: latLng.lng,
+    })), // Save coordinates of movement history
+    cacheState: CacheStorage.map((cache) => ({
+      bounds: cache.getBounds().toBBoxString(), // Saving cache boundaries
+      coins: coinCounters.get(cache.getBounds().toBBoxString()), // Get the number of coins in this cache
+    })),
+  };
+  localStorage.setItem("playerState", JSON.stringify(state));
+}
+
+// Load player state from localStorage
+function loadState() {
+  const savedState = localStorage.getItem("playerState");
+  if (savedState) {
+    const state = JSON.parse(savedState);
+
+    // Restore player position
+    playerPosition = leaflet.latLng(state.position.lat, state.position.lng);
+    playerMarker.setLatLng(playerPosition);
+    map.panTo(playerPosition);
+
+    // Restore player coins
+    playerCoins = state.coins.map((id: string) => new Coin(id, 1));
+    updateStatus();
+
+    // Restore movement history and draw the path
+    movementHistory = state.movementHistory || [];
+    movementHistory.forEach((coord: { lat: number; lng: number }) => {
+      const lastPosition = movementHistory[movementHistory.length - 1];
+      if (lastPosition) {
+        const newMovementSegment = leaflet.polyline(
+          [
+            leaflet.latLng(lastPosition.lat, lastPosition.lng),
+            leaflet.latLng(coord.lat, coord.lng),
+          ],
+          { color: "blue", weight: 2, opacity: 0.7 },
+        ).addTo(map);
+        movementPolylines.push(newMovementSegment);
+      }
+      movementHistory.push(coord);
+    });
+
+    // Restore cache state (this will also regenerate caches)
+    state.cacheState.forEach((cacheData: { bounds: string; coins: number }) => {
+      const bounds = leaflet.latLngBounds(cacheData.bounds);
+      CacheSpawner(bounds, cacheData.coins);
+    });
+
+    updateStatus();
+  }
+}
+
+// Call savePlayerState periodically or on globalThis unload
+globalThis.addEventListener("beforeunload", saveState);
+document.addEventListener("DOMContentLoaded", loadState);
 
 initializeCaches();
