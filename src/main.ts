@@ -12,6 +12,9 @@ const TileDegree = 1e-4;
 const SpawnRadius = 8;
 const CacheRate = 0.1;
 
+//Cache store to keep track of generated cache rectangles
+let CacheStorage: leaflet.Rectangle[] = [];
+
 //Map Setup
 const map = leaflet.map(document.getElementById("map")!, {
   center: Kingsburg_StartPoint,
@@ -28,6 +31,7 @@ leaflet.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
   .addTo(map);
 
 //Player Setup
+let playerPosition = Kingsburg_StartPoint;
 const playerMarker = leaflet.marker(Kingsburg_StartPoint);
 playerMarker.bindTooltip("YOU ARE HERE");
 playerMarker.addTo(map);
@@ -39,13 +43,10 @@ statusPanel.innerHTML = "0 Coins in Inventory";
 function initializeCaches() {
   for (let i = -SpawnRadius; i <= SpawnRadius; i++) {
     for (let j = -SpawnRadius; j <= SpawnRadius; j++) {
-      const { i: cellI, j: cellJ } = getCellCoordinates(
-        Kingsburg_StartPoint.lat + i * TileDegree,
-        Kingsburg_StartPoint.lng + j * TileDegree,
-      );
-
+      const cellI = i;
+      const cellJ = j;
       if (luck(`${cellI},${cellJ}`) < CacheRate) {
-        CacheSpawner(i, j);
+        CacheSpawner(cellI, cellJ);
       }
     }
   }
@@ -55,8 +56,8 @@ function getCellCoordinates(
   lat: number,
   lng: number,
 ): { i: number; j: number } {
-  const i = Math.floor(lat / TileDegree);
-  const j = Math.floor(lng / TileDegree);
+  const i = Math.floor((lat - Kingsburg_StartPoint.lat) / TileDegree);
+  const j = Math.floor((lng - Kingsburg_StartPoint.lng) / TileDegree);
   return { i, j };
 }
 
@@ -67,16 +68,14 @@ class Coin {
 const coinCounters = new Map<string, number>();
 
 function CacheSpawner(i: number, j: number) {
-  const bounds = leaflet.latLngBounds([
-    [
-      Kingsburg_StartPoint.lat + i * TileDegree,
-      Kingsburg_StartPoint.lng + j * TileDegree,
-    ],
-    [
-      Kingsburg_StartPoint.lat + (i + 1) * TileDegree,
-      Kingsburg_StartPoint.lng + (j + 1) * TileDegree,
-    ],
-  ]);
+  const latStart = Kingsburg_StartPoint.lat + i * TileDegree;
+  const lngStart = Kingsburg_StartPoint.lng + j * TileDegree;
+  const latEnd = latStart + TileDegree;
+  const lngEnd = lngStart + TileDegree;
+  const bounds = leaflet.latLngBounds(
+    [latStart, lngStart],
+    [latEnd, lngEnd],
+  );
 
   const cacheKey = `${i},${j}`;
 
@@ -109,66 +108,47 @@ function CacheSpawner(i: number, j: number) {
   rect.addTo(map);
   rect.bringToFront();
 
+  CacheStorage.push(rect);
+
   //Cache details and deposit button
   rect.bindPopup(() => {
     const popupDiv = document.createElement("div");
-
     let coinsHtml = `<div>Cache at "${i}:${j}". Coins available:</div>`;
     coins.forEach((coin) => {
-      coinsHtml += `
-        <div>
-          Coin ID: <code>${coin.id}</code> (Value: ${coin.value})
-          <button class="collect" data-coin-id="${coin.id}">Collect</button>
-        </div>`;
+      coinsHtml +=
+        `<div>Coin ID: <code>${coin.id}</code> (Value: ${coin.value}) <button class="collect" data-coin-id="${coin.id}">Collect</button></div>`;
     });
-
     coinsHtml += `<div><button id="deposit">Deposit All Coins</button></div>`;
-
     popupDiv.innerHTML = coinsHtml;
 
-    //Collect buttons logic
     popupDiv.querySelectorAll<HTMLButtonElement>(".collect").forEach(
       (button) => {
         button.addEventListener("click", (e) => {
           const coinId = (e.target as HTMLButtonElement).dataset.coinId;
-          if (coinId) {
-            const coin = coins.find((c) => c.id === coinId);
-            if (coin) {
-              playerCoins.push(coin); //Add coin to player's inventory
-              console.log(`Collected Coin: ${coin.id}`);
-              coins.splice(coins.indexOf(coin), 1); //Remove collected coin
-              updateStatus();
-              updatePopupValue(popupDiv);
-
-              //Change the button style to indicate it's been collected
-              const collectButton = e.target as HTMLButtonElement;
-              collectButton.disabled = true; //Disable the button
-              collectButton.style.backgroundColor = "#ddd"; //Darken the color
-              collectButton.textContent = "Collected";
-            }
+          const coin = coins.find((c) => c.id === coinId);
+          if (coin) {
+            playerCoins.push(coin);
+            coins.splice(coins.indexOf(coin), 1);
+            updateStatus();
+            updatePopupValue(popupDiv);
+            button.disabled = true;
+            button.style.backgroundColor = "#ddd";
+            button.textContent = "Collected";
           }
         });
       },
     );
 
-    //Deposit button logic
     popupDiv.querySelector<HTMLButtonElement>("#deposit")!.addEventListener(
       "click",
       () => {
-        if (playerCoins.length > 0) {
-          playerCoins.forEach((coin) => {
-            const newCoinId = coin.id;
-            const newCoinValue = coin.value; //Modifiable deposit value
-            coins.push(new Coin(newCoinId, newCoinValue)); //Add to the cache's coins array
-          });
-
-          playerCoins = []; //Clear the player's inventory after deposit
-          updateStatus();
-          updatePopupValue(popupDiv);
-
-          //Close the popup after deposit
-          rect.closePopup();
-        }
+        playerCoins.forEach((coin) => {
+          coins.push(new Coin(coin.id, coin.value));
+        });
+        playerCoins = [];
+        updateStatus();
+        updatePopupValue(popupDiv);
+        rect.closePopup();
       },
     );
 
@@ -188,6 +168,107 @@ function updatePopupValue(popupDiv: HTMLDivElement) {
   popupDiv.querySelectorAll("span#value").forEach((span) => {
     span.innerHTML = `${totalCoins}`;
   });
+}
+
+//Generate caches nearby
+function GenerateNearbyCaches() {
+  const { i: playerI, j: playerJ } = getCellCoordinates(
+    playerPosition.lat,
+    playerPosition.lng,
+  );
+
+  for (let di = -SpawnRadius; di <= SpawnRadius; di++) {
+    for (let dj = -SpawnRadius; dj <= SpawnRadius; dj++) {
+      const cellI = playerI + di;
+      const cellJ = playerJ + dj;
+      const cellKey = `${cellI},${cellJ}`;
+
+      //Calculate the lat/long off start point
+      const lat = Kingsburg_StartPoint.lat + cellI * TileDegree;
+      const lng = Kingsburg_StartPoint.lng + cellJ * TileDegree;
+
+      //Only spawn if no existing cache at the location
+      if (
+        luck(cellKey) < CacheRate &&
+        !CacheStorage.some((cache) =>
+          cache.getBounds().contains(leaflet.latLng(lat, lng))
+        )
+      ) {
+        CacheSpawner(cellI, cellJ);
+      }
+    }
+  }
+}
+class CacheMemento {
+  constructor(
+    public state: Map<string, { bounds: leaflet.LatLngBounds; coins: Coin[] }>,
+  ) {}
+}
+
+class CacheCaretaker {
+  private mementos: CacheMemento[] = [];
+  save(state: Map<string, { bounds: leaflet.LatLngBounds; coins: Coin[] }>) {
+    this.mementos.push(new CacheMemento(new Map(state)));
+  }
+  restore():
+    | Map<string, { bounds: leaflet.LatLngBounds; coins: Coin[] }>
+    | undefined {
+    const memento = this.mementos.pop();
+    return memento ? new Map(memento.state) : undefined;
+  }
+}
+
+//Instantiate the caretaker and save initial cache state
+const cacheCaretaker = new CacheCaretaker();
+cacheCaretaker.save(new Map());
+
+//Player Movement Settings Beyond this point -----------------
+const moveButtons = {
+  north: document.getElementById("north"),
+  south: document.getElementById("south"),
+  west: document.getElementById("west"),
+  east: document.getElementById("east"),
+  reset: document.getElementById("reset"),
+};
+
+if (
+  moveButtons.north && moveButtons.south && moveButtons.west &&
+  moveButtons.east && moveButtons.reset
+) {
+  moveButtons.north.addEventListener("click", () => PlayerMoves(1, 0));
+  moveButtons.south.addEventListener("click", () => PlayerMoves(-1, 0));
+  moveButtons.west.addEventListener("click", () => PlayerMoves(0, -1));
+  moveButtons.east.addEventListener("click", () => PlayerMoves(0, 1));
+  moveButtons.reset.addEventListener("click", resetPlayer); //Reset to the starting point
+}
+
+//Movement Behavior
+function PlayerMoves(deltaI: number, deltaJ: number) {
+  const movementDistance = TileDegree;
+  playerPosition = leaflet.latLng(
+    playerPosition.lat + deltaI * movementDistance,
+    playerPosition.lng + deltaJ * movementDistance,
+  );
+  playerMarker.setLatLng(playerPosition);
+  map.panTo(playerPosition);
+
+  //Generate caches around player's new position
+  GenerateNearbyCaches();
+}
+
+//Reset player position at start
+function resetPlayer() {
+  //Reset player position
+  playerPosition = Kingsburg_StartPoint;
+  playerMarker.setLatLng(Kingsburg_StartPoint);
+  map.panTo(Kingsburg_StartPoint);
+
+  //Remove existing cache rectangles from the map and clear CacheStorage
+  CacheStorage.forEach((rect) => map.removeLayer(rect));
+  CacheStorage = []; //Clear the array
+
+  //Reinitialize caches after clearing
+  initializeCaches();
 }
 
 initializeCaches();
