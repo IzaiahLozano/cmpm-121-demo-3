@@ -313,6 +313,8 @@ function PlayerMoves(deltaI: number, deltaJ: number) {
   GenerateNearbyCaches();
 }
 
+// Reset Settings Below-----------------------------------------------------------
+
 //Reset player position at start + reset game state
 function resetGame() {
   const userConfirmation = prompt(
@@ -320,37 +322,41 @@ function resetGame() {
   );
 
   if (userConfirmation === "YES") {
-    // Reset player position
-    playerPosition = Kingsburg_StartPoint;
-    playerMarker.setLatLng(Kingsburg_StartPoint);
-    map.panTo(Kingsburg_StartPoint);
-
-    // Remove collected coins (if any)
-    playerCoins = [];
-
-    // Clear movement history and remove polylines
-    movementHistory = [];
-    movementPolylines.forEach((polyline) => map.removeLayer(polyline));
-    movementPolylines = [];
-
-    // Return coins to caches (clear all cache storage and reset them)
-    CacheStorage.forEach((rect) => {
-      const cacheKey = rect.getBounds().toBBoxString();
-      coinCounters.set(cacheKey, 0); //Reset coin counters
-    });
-
-    // Clear the map of caches and reset them
-    CacheStorage.forEach((rect) => map.removeLayer(rect));
-    CacheStorage = [];
-    initializeCaches(); //Reinitialize caches
-    updateStatus();
-
+    resetPlayerPosition();
+    resetCaches();
+    resetMovementHistory();
+    resetPlayerInventory();
     console.log("Game reset complete.");
   } else {
-    //Canceled reset
     console.log("Game reset canceled.");
   }
 }
+
+function resetPlayerPosition() {
+  playerPosition = Kingsburg_StartPoint;
+  playerMarker.setLatLng(Kingsburg_StartPoint);
+  map.panTo(Kingsburg_StartPoint);
+}
+
+function resetCaches() {
+  // Clear the map of caches and reset them
+  CacheStorage.forEach((rect) => map.removeLayer(rect));
+  CacheStorage = [];
+  coinCounters.clear();
+  initializeCaches(); // Reinitialize caches
+}
+
+function resetMovementHistory() {
+  movementHistory = [];
+  movementPolylines.forEach((polyline) => map.removeLayer(polyline));
+  movementPolylines = [];
+}
+
+function resetPlayerInventory() {
+  playerCoins = [];
+  updateStatus();
+}
+
 //Save and load player state settings Below------------------------------
 
 // Save player state to localStorage
