@@ -30,9 +30,10 @@ const map = leaflet.map(document.getElementById("map")!, {
   scrollWheelZoom: false,
 });
 
-leaflet.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  maxZoom: 19,
-})
+leaflet
+  .tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+  })
   .addTo(map);
 
 //Player Setup
@@ -73,31 +74,61 @@ class Coin {
 
 const coinCounters = new Map<string, number>();
 
+function buildCachePopup(
+  i: number,
+  j: number,
+  coins: Coin[],
+  onCollect: (coin: Coin) => void,
+  onDeposit: () => void,
+): HTMLDivElement {
+  const popupDiv = document.createElement("div");
+  let coinsHtml = `<div>Cache at "${i}:${j}". Coins available:</div>`;
+  coins.forEach((coin) => {
+    coinsHtml +=
+      `<div>Coin ID: <code>${coin.id}</code> (Value: ${coin.value}) <button class="collect" data-coin-id="${coin.id}">Collect</button></div>`;
+  });
+  coinsHtml += `<div><button id="deposit">Deposit All Coins</button></div>`;
+  popupDiv.innerHTML = coinsHtml;
+
+  popupDiv.querySelectorAll<HTMLButtonElement>(".collect").forEach((button) => {
+    button.addEventListener("click", (e) => {
+      const coinId = (e.target as HTMLButtonElement).dataset.coinId;
+      const coin = coins.find((c) => c.id === coinId);
+      if (coin) {
+        onCollect(coin);
+        button.disabled = true;
+        button.style.backgroundColor = "#ddd";
+        button.textContent = "Collected";
+      }
+    });
+  });
+
+  popupDiv
+    .querySelector<HTMLButtonElement>("#deposit")!
+    .addEventListener("click", () => {
+      onDeposit();
+    });
+
+  return popupDiv;
+}
+
 function CacheSpawner(i: number, j: number) {
   const latStart = Kingsburg_StartPoint.lat + i * TileDegree;
   const lngStart = Kingsburg_StartPoint.lng + j * TileDegree;
   const latEnd = latStart + TileDegree;
   const lngEnd = lngStart + TileDegree;
-  const bounds = leaflet.latLngBounds(
-    [latStart, lngStart],
-    [latEnd, lngEnd],
-  );
+  const bounds = leaflet.latLngBounds([latStart, lngStart], [latEnd, lngEnd]);
 
   const cacheKey = `${i},${j}`;
-
   if (!coinCounters.has(cacheKey)) {
     coinCounters.set(cacheKey, 0);
   }
 
-  const coinSerial = coinCounters.get(cacheKey)!; //Must be defined now
+  const coinSerial = coinCounters.get(cacheKey)!;
   coinCounters.set(cacheKey, coinSerial + 1);
 
   const coins: Coin[] = [];
-
-  //Generate Coins for this cache
-  const numberOfCoins = Math.floor(luck(`${i},${j},numCoins`) * 5) + 1; //Number of coins per cache
-
-  //Create coins for this cache
+  const numberOfCoins = Math.floor(luck(`${i},${j},numCoins`) * 5) + 1;
   for (let c = 0; c < numberOfCoins; c++) {
     const coinId = `${i}:${j}#${coinSerial + c}`;
     const coinValue =
@@ -106,74 +137,41 @@ function CacheSpawner(i: number, j: number) {
   }
 
   const rect = leaflet.rectangle(bounds, {
-    color: "#3388ff", //Outline color
-    weight: 2, //Outline thickness
-    fillColor: "#3388ff", //Inner color
-    fillOpacity: 0.3, //Transparency of fill
+    color: "#3388ff",
+    weight: 2,
+    fillColor: "#3388ff",
+    fillOpacity: 0.3,
   });
   rect.addTo(map);
-  rect.bringToFront();
-
   CacheStorage.push(rect);
 
-  //Cache details and deposit button
-  rect.bindPopup(() => {
-    const popupDiv = document.createElement("div");
-    let coinsHtml = `<div>Cache at "${i}:${j}". Coins available:</div>`;
-    coins.forEach((coin) => {
-      coinsHtml +=
-        `<div>Coin ID: <code>${coin.id}</code> (Value: ${coin.value}) <button class="collect" data-coin-id="${coin.id}">Collect</button></div>`;
-    });
-    coinsHtml += `<div><button id="deposit">Deposit All Coins</button></div>`;
-    popupDiv.innerHTML = coinsHtml;
-
-    popupDiv.querySelectorAll<HTMLButtonElement>(".collect").forEach(
-      (button) => {
-        button.addEventListener("click", (e) => {
-          const coinId = (e.target as HTMLButtonElement).dataset.coinId;
-          const coin = coins.find((c) => c.id === coinId);
-          if (coin) {
-            playerCoins.push(coin);
-            coins.splice(coins.indexOf(coin), 1);
-            updateStatus();
-            updatePopupValue(popupDiv);
-            button.disabled = true;
-            button.style.backgroundColor = "#ddd";
-            button.textContent = "Collected";
-          }
-        });
+  // Use the extracted UI function
+  rect.bindPopup(() =>
+    buildCachePopup(
+      i,
+      j,
+      coins,
+      (coin) => {
+        playerCoins.push(coin);
+        coins.splice(coins.indexOf(coin), 1);
+        updateStatus();
       },
-    );
-
-    popupDiv.querySelector<HTMLButtonElement>("#deposit")!.addEventListener(
-      "click",
       () => {
         playerCoins.forEach((coin) => {
           coins.push(new Coin(coin.id, coin.value));
         });
         playerCoins = [];
         updateStatus();
-        updatePopupValue(popupDiv);
         rect.closePopup();
       },
-    );
-
-    return popupDiv;
-  });
+    )
+  );
 }
 
 //Update status panel
 function updateStatus() {
   const totalCoins = playerCoins.reduce((sum, coin) => sum + coin.value, 0);
   statusPanel.innerHTML = `${totalCoins} Coins in Inventory`;
-}
-
-//Update popup text
-function updatePopupValue(popupDiv: HTMLDivElement) {
-  const totalCoins = playerCoins.reduce((sum, coin) => sum + coin.value, 0);
-  popupDiv.querySelectorAll("span#value").forEach((span) => {
-    span.innerHTML = `${totalCoins}`;
-  });
 }
 
 function updatePlayerPosition(position: GeolocationPosition) {
@@ -273,8 +271,11 @@ const moveButtons = {
 };
 
 if (
-  moveButtons.north && moveButtons.south && moveButtons.west &&
-  moveButtons.east && moveButtons.reset
+  moveButtons.north &&
+  moveButtons.south &&
+  moveButtons.west &&
+  moveButtons.east &&
+  moveButtons.reset
 ) {
   moveButtons.north.addEventListener("click", () => PlayerMoves(1, 0));
   moveButtons.south.addEventListener("click", () => PlayerMoves(-1, 0));
@@ -292,14 +293,13 @@ function PlayerMoves(deltaI: number, deltaJ: number) {
   );
 
   // Create a polyline segment for the new movement
-  const movementSegment = leaflet.polyline(
-    [playerPosition, newPlayerPosition],
-    {
+  const movementSegment = leaflet
+    .polyline([playerPosition, newPlayerPosition], {
       color: "blue",
       weight: 2,
       opacity: 0.7,
-    },
-  ).addTo(map);
+    })
+    .addTo(map);
 
   // Store this polyline for potential removal later (if needed)
   movementPolylines.push(movementSegment);
@@ -390,13 +390,15 @@ function loadState() {
     movementHistory.forEach((coord: { lat: number; lng: number }) => {
       const lastPosition = movementHistory[movementHistory.length - 1];
       if (lastPosition) {
-        const newMovementSegment = leaflet.polyline(
-          [
-            leaflet.latLng(lastPosition.lat, lastPosition.lng),
-            leaflet.latLng(coord.lat, coord.lng),
-          ],
-          { color: "blue", weight: 2, opacity: 0.7 },
-        ).addTo(map);
+        const newMovementSegment = leaflet
+          .polyline(
+            [
+              leaflet.latLng(lastPosition.lat, lastPosition.lng),
+              leaflet.latLng(coord.lat, coord.lng),
+            ],
+            { color: "blue", weight: 2, opacity: 0.7 },
+          )
+          .addTo(map);
         movementPolylines.push(newMovementSegment);
       }
       movementHistory.push(coord);
