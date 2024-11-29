@@ -111,7 +111,7 @@ function buildCachePopup(
   return popupDiv;
 }
 
-function CacheSpawner(i: number, j: number) {
+function CacheSpawner(i: number, j: number, savedCoins?: number) {
   const latStart = Kingsburg_StartPoint.lat + i * TileDegree;
   const lngStart = Kingsburg_StartPoint.lng + j * TileDegree;
   const latEnd = latStart + TileDegree;
@@ -120,18 +120,18 @@ function CacheSpawner(i: number, j: number) {
 
   const cacheKey = `${i},${j}`;
   if (!coinCounters.has(cacheKey)) {
-    coinCounters.set(cacheKey, 0);
+    coinCounters.set(cacheKey, savedCoins || 0);
   }
 
   const coinSerial = coinCounters.get(cacheKey)!;
   coinCounters.set(cacheKey, coinSerial + 1);
 
   const coins: Coin[] = [];
-  const numberOfCoins = Math.floor(luck(`${i},${j},numCoins`) * 5) + 1;
+  const numberOfCoins = savedCoins !== undefined ? savedCoins : Math.floor(luck(`${i},${j},numCoins`) * 5) + 1;
+
   for (let c = 0; c < numberOfCoins; c++) {
     const coinId = `${i}:${j}#${coinSerial + c}`;
     const coinValue = 1;
-    //Math.floor(luck(`${i},${j},coinValue${coinSerial + c}`) * 10) + 1;
     coins.push(new Coin(coinId, coinValue));
   }
 
@@ -374,10 +374,19 @@ function saveState() {
         end: { lat: latLngs[1].lat, lng: latLngs[1].lng },
       };
     }),
-    cacheState: CacheStorage.map((cache) => ({
-      bounds: cache.getBounds().toBBoxString(), // Saving cache boundaries
-      coins: coinCounters.get(cache.getBounds().toBBoxString()), // Get the number of coins in this cache
-    })),
+    cacheState: CacheStorage.map((cache) => {
+      const bounds = cache.getBounds();
+      const center = bounds.getCenter();
+    
+      // Convert the center lat/lng back to grid coordinates
+      const { i, j } = getCellCoordinates(center.lat, center.lng);
+    
+      return {
+        i, // Save the grid row index
+        j, // Save the grid column index
+        coins: coinCounters.get(bounds.toBBoxString()), // Save coins
+      };
+    }),
   };
   localStorage.setItem("playerState", JSON.stringify(state));
 }
@@ -415,9 +424,8 @@ function loadState() {
     );
 
     // Restore cache state (this will also regenerate caches)
-    state.cacheState.forEach((cacheData: { bounds: string; coins: number }) => {
-      const bounds = leaflet.latLngBounds(cacheData.bounds);
-      CacheSpawner(bounds, cacheData.coins);
+    state.cacheState.forEach((cacheData: { i: number; j: number; coins: number }) => {
+      CacheSpawner(cacheData.i, cacheData.j, cacheData.coins);
     });
 
     updateStatus();
