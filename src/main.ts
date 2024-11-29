@@ -61,7 +61,7 @@ function initializeCaches() {
 
 function getCellCoordinates(
   lat: number,
-  lng: number,
+  lng: number
 ): { i: number; j: number } {
   const i = Math.floor((lat - Kingsburg_StartPoint.lat) / TileDegree);
   const j = Math.floor((lng - Kingsburg_StartPoint.lng) / TileDegree);
@@ -79,13 +79,12 @@ function buildCachePopup(
   j: number,
   coins: Coin[],
   onCollect: (coin: Coin) => void,
-  onDeposit: () => void,
+  onDeposit: () => void
 ): HTMLDivElement {
   const popupDiv = document.createElement("div");
   let coinsHtml = `<div>Cache at "${i}:${j}". Coins available:</div>`;
   coins.forEach((coin) => {
-    coinsHtml +=
-      `<div>Coin ID: <code>${coin.id}</code> (Value: ${coin.value}) <button class="collect" data-coin-id="${coin.id}">Collect</button></div>`;
+    coinsHtml += `<div>Coin ID: <code>${coin.id}</code> (Value: 1) <button class="collect" data-coin-id="${coin.id}">Collect</button></div>`;
   });
   coinsHtml += `<div><button id="deposit">Deposit All Coins</button></div>`;
   popupDiv.innerHTML = coinsHtml;
@@ -131,8 +130,8 @@ function CacheSpawner(i: number, j: number) {
   const numberOfCoins = Math.floor(luck(`${i},${j},numCoins`) * 5) + 1;
   for (let c = 0; c < numberOfCoins; c++) {
     const coinId = `${i}:${j}#${coinSerial + c}`;
-    const coinValue =
-      Math.floor(luck(`${i},${j},coinValue${coinSerial + c}`) * 10) + 1;
+    const coinValue = 1;
+    //Math.floor(luck(`${i},${j},coinValue${coinSerial + c}`) * 10) + 1;
     coins.push(new Coin(coinId, coinValue));
   }
 
@@ -163,7 +162,7 @@ function CacheSpawner(i: number, j: number) {
         playerCoins = [];
         updateStatus();
         rect.closePopup();
-      },
+      }
     )
   );
 }
@@ -190,7 +189,7 @@ function updatePlayerPosition(position: GeolocationPosition) {
 function GenerateNearbyCaches() {
   const { i: playerI, j: playerJ } = getCellCoordinates(
     playerPosition.lat,
-    playerPosition.lng,
+    playerPosition.lng
   );
 
   for (let di = -SpawnRadius; di <= SpawnRadius; di++) {
@@ -217,7 +216,7 @@ function GenerateNearbyCaches() {
 }
 class CacheMemento {
   constructor(
-    public state: Map<string, { bounds: leaflet.LatLngBounds; coins: Coin[] }>,
+    public state: Map<string, { bounds: leaflet.LatLngBounds; coins: Coin[] }>
   ) {}
 }
 
@@ -252,7 +251,7 @@ function togglelocation() {
   } else {
     // Start the geolocation watch
     geoWatchId = navigator.geolocation.watchPosition(
-      updatePlayerPosition, // Function to update player position
+      updatePlayerPosition // Function to update player position
     );
     autoUpdateEnabled = true;
   }
@@ -289,7 +288,7 @@ function PlayerMoves(deltaI: number, deltaJ: number) {
   const movementDistance = TileDegree;
   const newPlayerPosition = leaflet.latLng(
     playerPosition.lat + deltaI * movementDistance,
-    playerPosition.lng + deltaJ * movementDistance,
+    playerPosition.lng + deltaJ * movementDistance
   );
 
   // Create a polyline segment for the new movement
@@ -318,7 +317,7 @@ function PlayerMoves(deltaI: number, deltaJ: number) {
 //Reset player position at start + reset game state
 function resetGame() {
   const userConfirmation = prompt(
-    "Are you sure you want to reset the game? This will erase your progress. Type 'YES' to confirm.",
+    "Are you sure you want to reset the game? This will erase your progress. Type 'YES' to confirm."
   );
 
   if (userConfirmation === "YES") {
@@ -367,7 +366,14 @@ function saveState() {
     movementHistory: movementHistory.map((latLng) => ({
       lat: latLng.lat,
       lng: latLng.lng,
-    })), // Save coordinates of movement history
+    })),
+    movementSegments: movementPolylines.map((polyline) => {
+      const latLngs = polyline.getLatLngs() as leaflet.LatLng[];
+      return {
+        start: { lat: latLngs[0].lat, lng: latLngs[0].lng },
+        end: { lat: latLngs[1].lat, lng: latLngs[1].lng },
+      };
+    }),
     cacheState: CacheStorage.map((cache) => ({
       bounds: cache.getBounds().toBBoxString(), // Saving cache boundaries
       coins: coinCounters.get(cache.getBounds().toBBoxString()), // Get the number of coins in this cache
@@ -393,22 +399,20 @@ function loadState() {
 
     // Restore movement history and draw the path
     movementHistory = state.movementHistory || [];
-    movementHistory.forEach((coord: { lat: number; lng: number }) => {
-      const lastPosition = movementHistory[movementHistory.length - 1];
-      if (lastPosition) {
-        const newMovementSegment = leaflet
+    (state.movementSegments || []).forEach(
+      (segment: { start: any; end: any }) => {
+        const polyline = leaflet
           .polyline(
             [
-              leaflet.latLng(lastPosition.lat, lastPosition.lng),
-              leaflet.latLng(coord.lat, coord.lng),
+              leaflet.latLng(segment.start.lat, segment.start.lng),
+              leaflet.latLng(segment.end.lat, segment.end.lng),
             ],
-            { color: "blue", weight: 2, opacity: 0.7 },
+            { color: "blue", weight: 2, opacity: 0.7 }
           )
           .addTo(map);
-        movementPolylines.push(newMovementSegment);
+        movementPolylines.push(polyline); // Add it back to the array
       }
-      movementHistory.push(coord);
-    });
+    );
 
     // Restore cache state (this will also regenerate caches)
     state.cacheState.forEach((cacheData: { bounds: string; coins: number }) => {
